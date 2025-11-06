@@ -1,7 +1,29 @@
 
 def get_model(model_name, adapted_component, adaptor_class, num_steers, rank,
-              epsilon, init_var, low_resource_mode):
-    if model_name.startswith("EleutherAI/gpt-neo") or \
+              epsilon, init_var, low_resource_mode, **kwargs):
+    
+    if "llama-3" in model_name.lower():
+        print("Loading model:", {model_name})
+        from lm_steer.models.model_gpt_neo import Switching_Llama3Model
+        model = Switching_Llama3Model(
+            model_name=model_name,
+            adapted_component=adapted_component,
+            adaptor_class=adaptor_class,
+            num_steers=num_steers,
+            rank=rank,
+            epsilon=epsilon,
+            init_var=init_var,
+            low_resource_mode=low_resource_mode,
+            **kwargs)
+        return model, model.tokenizer
+    elif "gemma-3" in model_name.lower():
+        raise NotImplementedError("Not debugged yet")
+    #     print("Loading model:", {model_name})
+    #     from lm_steer.models.model_gpt_neo import Switching_Gemma3Model
+    #     model = Switching_Gemma3Model(model_name, adapted_component, adaptor_class, num_steers, rank,
+    #         epsilon, init_var, low_resource_mode, **kwargs)
+    #     return model, model.tokenizer
+    elif model_name.startswith("EleutherAI/gpt-neo") or \
             model_name.startswith("gpt2"):
         from lm_steer.models.model_gpt_neo import Switching_GPTNeoModel
         model = Switching_GPTNeoModel(
