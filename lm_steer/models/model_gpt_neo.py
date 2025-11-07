@@ -49,7 +49,7 @@ class Switching_Llama3Model(LMSteerBase):
                  low_resource_mode, device="cuda"):
         super().__init__()
         self.adapted_component = adapted_component
-        self.pipeline = pipeline('text-generation', model=model_name)
+        self.pipeline = pipeline('text-generation', model=model_name, dtype=torch.bfloat16, low_cpu_mem_usage=True)
         self.model = self.pipeline.model
         self.tokenizer = self.pipeline.tokenizer
         self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -65,15 +65,16 @@ class Switching_Llama3Model(LMSteerBase):
             _param.requires_grad_(False)
 
         if adapted_component == "final_layer":
-            self.model.transformer = Hack_no_grad(self.model.transformer)
+            self.model.model = Hack_no_grad(self.model.model)
             self.steer = Projected_Adaptor(
                 self.model.lm_head, adaptor_class, num_steers, embed_dim,
-                vocab_size, rank, epsilon, init_var, "output")
+                vocab_size, rank, epsilon, init_var, "output", dtype=torch.bfloat16)
             self.model.set_output_embeddings(self.steer)
         elif adapted_component == "input_embedding":
+            import pdb; pdb.set_trace()
             self.steer = Projected_Adaptor(
-                self.model.transformer.wte, adaptor_class, num_steers,
-                embed_dim, vocab_size, rank, epsilon, init_var, "input")
+                self.model.transformer.wte, adaptor_class, num_steers, # will error
+                embed_dim, vocab_size, rank, epsilon, init_var, "input", dtype=torch.bfloat16)
             self.model.transformer.set_input_embeddings(self.steer)
         else:
             raise NotImplementedError()

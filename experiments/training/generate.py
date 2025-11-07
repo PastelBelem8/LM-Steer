@@ -9,7 +9,8 @@ from lm_steer.models.get_model import get_model
 def generate(prompt_data, steer_values, tokenizer, model,
              prompt_num, prompt_length, num_beams, num_beam_groups,
              do_sample, temperature, top_p, device):
-    for _prompt in tqdm(prompt_data):
+    # for _prompt in tqdm(prompt_data): # original
+    for _prompt in tqdm(prompt_data[:100]): # edited @kat debug
         _prompt["generations"] = []
         prompt_text = _prompt["prompt"]["text"]
         token_length = tokenizer(prompt_text,
@@ -43,10 +44,10 @@ def main(args):
         args.num_steers,
         args.rank, args.epsilon, args.init_var, args.low_resource_mode)
     model.to_device(device)
-
-    ckpt = torch.load(args.ckpt_name)
+    
+    ckpt = torch.load(args.ckpt_name, weights_only=False)
     model.load_state_dict(ckpt[1])
-
+        
     # predicting sentences
     with open(args.eval_file, "r") as f:
         prompt_data = list(map(json.loads, f.readlines()))

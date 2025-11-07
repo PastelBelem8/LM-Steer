@@ -4,23 +4,27 @@ import torch.nn as nn
 
 class Projected_Adaptor(nn.Module):
     def __init__(self, lm_head, adaptor_class, num_steers, embed_dim,
-                 vocab_size, rank, epsilon, init_var, position="output"):
+                 vocab_size, rank, epsilon, init_var, position="output", dtype=None):
         super().__init__()
         assert rank > 0
+        kwargs = {}
+        if dtype:
+            kwargs["dtype"] = dtype
+        
         if adaptor_class == "multiply":
             self.projector1 = nn.Parameter(torch.randn(
-                num_steers, embed_dim, rank
+                num_steers, embed_dim, rank, **kwargs,
             ) * init_var)
             self.projector2 = nn.Parameter(torch.randn(
-                num_steers, embed_dim, rank
+                num_steers, embed_dim, rank, **kwargs,
             ) * init_var)
         elif adaptor_class == "add":
             self.add_vec = nn.Parameter(torch.randn(
-                num_steers, embed_dim
+                num_steers, embed_dim, **kwargs,
             ))
         elif adaptor_class == "offset":
             self.offset_vec = nn.Parameter(torch.randn(
-                num_steers, vocab_size
+                num_steers, vocab_size, **kwargs,
             ))
         else:
             raise NotImplementedError()
@@ -42,23 +46,26 @@ class Projected_Adaptor(nn.Module):
             return state.matmul(
                 self.lm_head.weight.detach().transpose(0, 1))
         if self.adaptor_class == "multiply":
-            delta = state[:, None].matmul(self.projector1[None]) *\
+            delta = state[:, None].to(self.projector1.dtype)\
+                .matmul(self.projector1[None]) *\
                 self.steer_values[:, :, None, None]
             delta = delta.matmul(
                 self.projector2.transpose(1, 2)[None]).sum(1)
             projected_state = state + self.epsilon * delta
-            logits = projected_state.matmul(
-                self.lm_head.weight.detach().transpose(0, 1))
+            logits = projected_state.to(state.dtype)\
+                .matmul(self.lm_head.weight.detach().transpose(0, 1))
         elif self.adaptor_class == "add":
             add_values = self.steer_values.matmul(self.add_vec)
             projected_state = state + self.epsilon * add_values[:, None]
-            logits = projected_state.matmul(
-                self.lm_head.weight.detach().transpose(0, 1))
+            logits = projected_state.to(state.dtype)\
+                .matmul(self.lm_head.weight.detach().transpose(0, 1))
         elif self.adaptor_class == "offset":
             offset_values = self.steer_values.matmul(self.offset_vec)
             logits = state.matmul(
                 self.lm_head.weight.detach().transpose(0, 1))
-            logits = logits + self.epsilon * offset_values[:, None]
+            logits = logits + self.epsilon *\
+                offset_values[:, None].to(state.dtype)
+            
         return logits
 
     def regularization_term(self):

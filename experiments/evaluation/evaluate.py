@@ -260,7 +260,9 @@ def main(generations_file, output_file, metrics, extra):
     assert os.path.exists(generations_file)
     output_dir = Path(os.path.dirname(generations_file))
     if generations_file.endswith(".jsonl"):
-        generations_df = pd.read_json(generations_file, lines=True)
+        # generations_df = pd.read_json(generations_file, lines=True) # original
+        generations_df = pd.read_json(generations_file, lines=True)[:100] # edited kat: 
+        
     else:
         with open(generations_file) as fin:
             generations_df = [{'prompt':{'text':''}, 'generations':[{'text':l.strip()}]} for l in fin.readlines()]
