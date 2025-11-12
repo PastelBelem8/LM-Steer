@@ -1,5 +1,6 @@
 import os
 import json
+import pandas as pd
 from datasets import load_dataset as load_huggingface_dataset
 
 
@@ -76,6 +77,37 @@ def load_toy_sentiment_data(dataset_name):
     return dataset
 
 
+def load_readability_dataset(dataset_name):
+    df = pd.read_csv(dataset_name, index_col=0)
+    if os.environ.get("PROMPT_COL", None) is not None:
+        input_col = os.environ["PROMPT_COL"]
+        df[input_col] = df[input_col].apply(eval)
+    elif "doc-level" in dataset_name:
+        input_col = "gpt4-explanation"
+    elif "sent-level" in dataset_name:
+        input_col = "gpt4-explanation_sentence"
+    else:
+        raise NotImplementedError(f"readability data is not supported yet: \n --> {dataset_name}")
+    
+    print("Prompt col:", input_col)
+    dataset = []
+    for _, example in df.iterrows():
+        input_ = example[input_col]
+        if isinstance(input_, str):
+            dataset.append({
+                "text": input_.strip(),
+                "label": example["true_label_id"],
+            })
+        elif isinstance(input_, list):
+            dataset.append({
+                "messages": input_,
+                "label": example["true_label_id"],
+            })
+        else:
+            raise NotImplementedError(f"{type(input_)} not supported: {input_}")
+    return dataset
+    
+
 def load_dataset(dataset_name, data_dir, subset):
     if dataset_name == "toxicity":
         dataset = load_toxicity_data(data_dir, subset)
@@ -83,6 +115,10 @@ def load_dataset(dataset_name, data_dir, subset):
         dataset = load_sentiment_data(dataset_name)
     elif dataset_name.startswith("toy-sentiment"):
         dataset = load_toy_sentiment_data(dataset_name)
+    elif dataset_name.startswith("readability-"):
+        dataset_name = dataset_name.split("readability-", maxsplit=1)[1]
+        print(dataset_name, data_dir, subset)
+        dataset = load_readability_dataset(dataset_name)
     else:
         raise NotImplementedError()
 
