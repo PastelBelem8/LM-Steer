@@ -1,6 +1,7 @@
 import json
 from tqdm import tqdm
 import torch
+import os
 
 from lm_steer.arguments import parse_args
 from lm_steer.models.get_model import get_model
@@ -12,9 +13,19 @@ def generate(prompt_data, steer_values, tokenizer, model,
     # for _prompt in tqdm(prompt_data): # original
     for _prompt in tqdm(prompt_data[:100]): # edited @kat debug
         _prompt["generations"] = []
-        prompt_text = _prompt["prompt"]["text"]
-        token_length = tokenizer(prompt_text,
-                                 return_tensors="pt")["input_ids"].shape[1]
+        if os.environ.get("PROMPT_COL", None) is not None:
+            prompt_col = os.environ["PROMPT_COL"]
+            prompt_text = _prompt[prompt_col]
+        else:
+            prompt_text = _prompt["prompt"]["text"]
+        
+        if isinstance(prompt_text, str):
+            token_length = tokenizer(prompt_text, return_tensors="pt")["input_ids"].shape[1]
+        else:
+            print("Applying chat template...")
+            token_length = tokenizer.apply_chat_template(prompt_text, return_tensors="pt").shape[1]
+            prompt_text = tokenizer.apply_chat_template(prompt_text, tokenize=False, add_generation_prompt=True)
+            
         for _i in range(prompt_num):
             output = model.generate(
                 prompt_text,
@@ -53,8 +64,10 @@ def main(args):
         prompt_data = list(map(json.loads, f.readlines()))
 
     model.eval()
-    prompt_num = 25
-    prompt_length = 20
+    prompt_num = int(os.environ.get("PROMPT_NUM", 25))
+    prompt_length = int(os.environ.get("PROMPT_NUM_TOKENS", 20))
+    print(f"Generating: {prompt_num} sequences for each prompt")
+    print(f"Generating up to {prompt_length} tokens for each prompt.")
     if args.eval_size is not None:
         prompt_data = prompt_data[:args.eval_size]
     num_beams = 1
