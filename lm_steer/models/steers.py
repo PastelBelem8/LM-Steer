@@ -2,6 +2,13 @@ import torch
 import torch.nn as nn
 
 
+def to_fp32(t):
+    if t.dtype == torch.float32:
+        return t
+    else:
+        return t.to(torch.float32)
+
+
 class Projected_Adaptor(nn.Module):
     def __init__(self, lm_head, adaptor_class, num_steers, embed_dim,
                  vocab_size, rank, epsilon, init_var, position="output", dtype=None):
@@ -45,15 +52,24 @@ class Projected_Adaptor(nn.Module):
         if self.steer_values.abs().sum() == 0:
             return state.matmul(
                 self.lm_head.weight.detach().transpose(0, 1))
+        # if self.adaptor_class == "multiply":
+        #     state_ = to_fp32(state)
+        #     projector1_ = to_fp32(self.projector1)
+        #     projector2_ = to_fp32(self.projector2)
+        #     delta = state_[:, None].matmul(projector1_[None]) *\
+        #         self.steer_values[:, :, None, None]
+        #     delta = delta.matmul(projector2_.transpose(1, 2)[None]).sum(1)
+        #     projected_state = state + self.epsilon * delta
+        #     logits = projected_state.to(self.lm_head.weight.dtype)\
+        #         .matmul(self.lm_head.weight.detach().transpose(0, 1))
         if self.adaptor_class == "multiply":
-            delta = state[:, None].to(self.projector1.dtype)\
-                .matmul(self.projector1[None]) *\
+            delta = state[:, None].matmul(self.projector1[None]) *\
                 self.steer_values[:, :, None, None]
             delta = delta.matmul(
                 self.projector2.transpose(1, 2)[None]).sum(1)
             projected_state = state + self.epsilon * delta
-            logits = projected_state.to(state.dtype)\
-                .matmul(self.lm_head.weight.detach().transpose(0, 1))
+            logits = projected_state.matmul(
+                self.lm_head.weight.detach().transpose(0, 1))
         elif self.adaptor_class == "add":
             add_values = self.steer_values.matmul(self.add_vec)
             projected_state = state + self.epsilon * add_values[:, None]
