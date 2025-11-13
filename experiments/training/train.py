@@ -1,8 +1,9 @@
 import os
 from tqdm import tqdm
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, default_collate
 from torch.optim import Adam
+from typing import Dict, List
 
 from lm_steer.arguments import parse_args
 from lm_steer.models.get_model import get_model
@@ -11,11 +12,39 @@ from lm_steer.utils import RunningMean
 from data import load_dataset
 
 
+def custom_collate(batch) -> Dict[str, List[str]]:
+    elem = batch[0]
+    if elem.get("messages", None) is not None:
+        res = {key: [] for key in elem.keys()}
+        for elem in batch:
+            for key, val in elem.items():
+                res[key].append(val)
+        return res
+    else:  # Fall back to `default_collate`
+        return default_collate(batch)
+    
+
 def main(args):
     train_data = load_dataset(args.dataset_name, args.data_dir, args.subset)
-    dataloader = DataLoader(
-        train_data, batch_size=args.batch_size,
-        shuffle=True)
+    print("Number of data points:", len(train_data))
+    if args.dataset_name.startswith("readability-"):
+        print("Using custom collate_fn")
+        collate_fn = custom_collate
+    else:
+        collate_fn = default_collate
+    # Note: The default dataloader does not handle maps
+    # chat-based inputs appropriately;
+    # From the [documentation](https://docs.pytorch.org/docs/stable/data.html#torch.utils.data.default_collate),
+    # we observe: 
+    # 
+    # ```
+    # >>> default_collate([{"A": 0, "B": 1}, {"A": 100, "B": 100}])
+    # {'A': tensor([  0, 100]), 'B': tensor([  1, 100])}
+    # ```
+    # So we will update it using a custom collate_fn
+    # ############ # ############ # ############ # ############ # ############
+    
+    dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
     data_iter = iter(dataloader)
 
     device = torch.device("cuda:0") if args.cuda else torch.device("cpu")
@@ -46,45 +75,42 @@ def main(args):
             data_iter = iter(dataloader)
             batch = next(data_iter, None)
 
-        cur_batch_size = len(batch["text"])
+        cur_batch_size = len(batch["label"])
         batch_stance = torch.zeros(cur_batch_size, args.num_steers).to(device)
-        batch_stance[:, args.training_steer] = torch.Tensor(
-            batch["label"]).to(device)
+        batch_stance[:, args.training_steer] = torch.Tensor(batch["label"]).to(device)
         if args.dummy_steer is not None:
             batch_stance[:, args.dummy_steer] = 1
-        batch_text = batch["text"]
-        tokenized = tokenizer(batch_text, padding=True,
-                              max_length=args.max_length, truncation=True)
+        
+        if batch.get("text", None) is None:
+            print("Applying Chat Template")
+            batch_text = batch["messages"]
+            batch_text = tokenizer.apply_chat_template(batch_text, tokenize=False)
+        else:
+            batch_text = batch["text"]
+            
+        tokenized = tokenizer(batch_text,
+                                padding=True,
+                                max_length=args.max_length,
+                                truncation=True)
+        
         input_ids = torch.LongTensor(tokenized["input_ids"]).to(device)
-
+        attention_mask = torch.LongTensor(tokenized["attention_mask"]).to(device)
         optimizer.zero_grad()
-        attention_mask = torch.LongTensor(tokenized["attention_mask"]).to(
-            device)
         if args.low_resource_mode:
-            with torch.amp.autocast(
-                device_type="cuda", dtype=torch.float16
-            ):
-                loss = model(
-                    input_ids, attention_mask,
-                    batch_stance.float()
-                ).loss
+            with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+                loss = model(input_ids, attention_mask, batch_stance.float()).loss
                 regularization_term = model.regularization_term()
-            scaler.scale(loss + args.regularization * regularization_term
-                         ).backward()
+            scaler.scale(loss + args.regularization * regularization_term).backward()
             scaler.step(optimizer)
             scaler.update()
         else:
-            loss = model(
-                input_ids, attention_mask,
-                batch_stance.float()
-            ).loss
+            loss = model(input_ids, attention_mask, batch_stance.float()).loss
             regularization_term = model.regularization_term()
             (loss + args.regularization * regularization_term).backward()
             optimizer.step()
 
         loss_mean.update(loss)
-        pbar.set_description(
-            f"{loss_mean.value}, {regularization_term.item()}")
+        pbar.set_description(f"(avg loss={loss_mean.value:.4f}, reg={regularization_term.item():.4f})")
         if (step_i+1) % args.log_step == 0:
             print(pbar.desc, flush=True)
 
